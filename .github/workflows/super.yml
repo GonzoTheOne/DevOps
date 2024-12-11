@@ -8,7 +8,7 @@ on:
     
 jobs:
   build_test:
-    runs-on: unbuntu-latest
+    runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v4
@@ -22,7 +22,7 @@ jobs:
       run: mvn -b package --file pom.xml
 
   publish-job:
-    runs-on: unbutu-latest
+    runs-on: ubutu-latest
     needs: build_test
     steps:
     - uses: actions/checkout@v4
