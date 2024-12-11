@@ -16,6 +16,7 @@ jobs:
       uses: actions/setup-java@v4
       with:
         java-version: '17'
+        distribution: 'temurin'
         cache: maven
     - name: Build With Maven
       run: mvn -b package --file pom.xml
@@ -28,6 +29,7 @@ jobs:
     - uses: actions/setup-java@v4
       with:
         java-version: '17'
+        distribution: 'temurin'
     - run: mvn --batch-mode --update-snapshots verify
     - run: mkdir staging && cp target/*.jar staging
     - uses: actions/upload-artifact@v4
