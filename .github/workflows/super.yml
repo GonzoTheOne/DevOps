@@ -1,8 +1,8 @@
 name: Action to test and push changes up
 
 on:
-  # pull_request:
-  #   branches: [ Dev ]
+   pull_request:
+     branches: [ Dev ]
   push:
     branches: [ Dev ]
     
