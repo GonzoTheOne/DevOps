@@ -3,7 +3,7 @@ name: Action to test and push changes up
 on:
    pull_request:
      branches: [ Dev ]
-  push:
+   push:
     branches: [ Dev ]
     
 jobs:
