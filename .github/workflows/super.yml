@@ -19,7 +19,7 @@ jobs:
         distribution: 'temurin'
         cache: maven
     - name: Build With Maven
-      run: mvn -b package --file pom.xml
+      run: mvn -B package --file pom.xml
 
   publish-job:
     runs-on: ubutu-latest
