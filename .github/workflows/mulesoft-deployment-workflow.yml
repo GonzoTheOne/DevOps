@@ -38,12 +38,13 @@ jobs:
         run: mvn clean package -DskipTests
 
       - name: Authenticate with HashiCorp Vault
-        # Add steps here to authenticate with Vault using the VAULT_TOKEN secret
+        id: vault_auth
         run: |
           echo "Authenticating with Vault..."
-          # You'll need the Vault address
           VAULT_ADDR="YOUR_VAULT_ADDRESS"
           VAULT_TOKEN="${{ secrets.VAULT_TOKEN }}"
+          echo "VAULT_ADDR=$VAULT_ADDR" >> "$GITHUB_OUTPUT"
+          echo "VAULT_TOKEN=$VAULT_TOKEN" >> "$GITHUB_OUTPUT"
 
           # Example: Get a client token (if needed, depending on your Vault setup)
           # This step might not be necessary if the provided token is sufficient
@@ -53,6 +54,7 @@ jobs:
           #   "$VAULT_ADDR/v1/auth/jwt/login")
           # AUTH_CLIENT_TOKEN=$(echo "$RESPONSE" | jq -r '.auth.client_token')
           # echo "Vault Client Token: $AUTH_CLIENT_TOKEN"
+          
 
       - name: Check and Renew Vault Token (if needed)
         if: steps.vault_auth.outputs.VAULT_TOKEN != '' # Only run if we have a token
@@ -87,13 +89,12 @@ jobs:
             echo "Vault token TTL is sufficient. No renewal needed."
             echo "NEW_VAULT_TOKEN=$CURRENT_TOKEN" >> "$GITHUB_OUTPUT"
           fi
-          
+
       - name: Retrieve Anypoint Credentials from Vault
-        # Add steps here to retrieve the necessary Anypoint credentials
         run: |
           echo "Retrieving Anypoint credentials from Vault..."
-          VAULT_ADDR="YOUR_VAULT_ADDRESS"
-          VAULT_TOKEN="${{ secrets.VAULT_TOKEN }}"
+          VAULT_ADDR="${{ steps.vault_auth.outputs.VAULT_ADDR }}"
+          VAULT_TOKEN="${{ steps.vault_renewal.outputs.NEW_VAULT_TOKEN }}"
           MULE_APP_NAME="${{ inputs.mule_app_name }}"
           ANYPOINT_ENVIRONMENT="${{ inputs.anypoint_environment }}"
           SECRET_PATH="secret/data/anypoint/${MULE_APP_NAME}/${ANYPOINT_ENVIRONMENT}" # Adjust this path as needed
@@ -115,16 +116,12 @@ jobs:
           echo "ANYPOINT_PASSWORD=$ANYPOINT_PASSWORD" >> "$GITHUB_ENV"
 
       - name: Authenticate with Anypoint Platform
-        # Steps to authenticate with Anypoint using the retrieved credentials
         run: |
           echo "Authenticating with Anypoint Platform using Vault-retrieved credentials..."
-          # You can now use the environment variables:
-          # $ANYPOINT_CLIENT_ID, $ANYPOINT_CLIENT_SECRET, $ANYPOINT_USERNAME, $ANYPOINT_PASSWORD
           echo "Client ID: $ANYPOINT_CLIENT_ID"
-          # Add your Anypoint authentication logic here, potentially using the CLI or other tools
+          # Add your Anypoint authentication logic here
 
       - name: Deploy to Anypoint Marketplace Cloud
         run: |
           echo "Deploying to Anypoint environment: ${{ inputs.anypoint_environment }}"
-          # Use the Anypoint CLI or Maven plugin for deployment,
-          # potentially using the environment variables set above
+          # Use the Anypoint CLI or Maven plugin for deployment
