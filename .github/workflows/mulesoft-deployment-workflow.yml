@@ -1,0 +1,62 @@
+name: MuleSoft Deployment
+
+on:
+  workflow_call:
+    inputs:
+      mule_app_name:
+        required: true
+        type: string
+      anypoint_environment:
+        required: true
+        type: string
+    secrets:
+      VAULT_TOKEN:
+        required: true
+      ANYPOINT_CLIENT_ID:
+        required: false # We'll try to fetch from Vault
+      ANYPOINT_CLIENT_SECRET:
+        required: false # We'll try to fetch from Vault
+      ANYPOINT_USERNAME:
+        required: false # We'll try to fetch from Vault
+      ANYPOINT_PASSWORD:
+        required: false # We'll try to fetch from Vault
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java and Maven
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17' # Or your preferred version
+
+      - name: Build Mule Application
+        run: mvn clean package -DskipTests
+
+      - name: Authenticate with HashiCorp Vault
+        # Add steps here to authenticate with Vault using the VAULT_TOKEN secret
+        run: |
+          echo "Authenticating with Vault..."
+          # You'll need Vault CLI or a similar tool here
+
+      - name: Retrieve Anypoint Credentials from Vault
+        # Add steps here to retrieve the necessary Anypoint credentials
+        run: |
+          echo "Retrieving Anypoint credentials from Vault..."
+          # Use Vault CLI to read secrets based on inputs.mule_app_name and inputs.anypoint_environment
+
+      - name: Authenticate with Anypoint Platform
+        # Steps to authenticate with Anypoint using the retrieved credentials
+        run: |
+          echo "Authenticating with Anypoint Platform..."
+          # You might set environment variables here
+
+      - name: Deploy to Anypoint Marketplace Cloud
+        # Steps to deploy the Mule application
+        run: |
+          echo "Deploying to Anypoint environment: ${{ inputs.anypoint_environment }}"
+          # Use the Anypoint CLI or Maven plugin for deployment
