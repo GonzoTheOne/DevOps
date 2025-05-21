@@ -1,0 +1,17 @@
+# .github/workflows/ci-cd.yml in each of your 80+ MuleSoft API repositories
+name: CI/CD for My MuleSoft API
+
+on:
+  push:
+    branches:
+      - main # Trigger on pushes to the main branch
+  workflow_dispatch: # Allows manual triggering from the GitHub UI
+
+jobs:
+  call_deployment_workflow:
+    uses: your-github-org/mulesoft-deployment-workflow/.github/workflows/deploy.yml@main # Replace with your actual org/repo name and branch
+    with:
+      mule_app_name: 'your-mulesoft-api-name-from-this-repo' # Replace with the actual name of THIS API
+      anypoint_environment: 'dev' # Or 'int', 'uat' depending on the stage of this workflow
+    secrets:
+      VAULT_TOKEN: ${{ secrets.REPO_VAULT_TOKEN }} # This secret must be defined in THIS API's GitHub repo
