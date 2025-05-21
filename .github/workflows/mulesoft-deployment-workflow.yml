@@ -54,6 +54,40 @@ jobs:
           # AUTH_CLIENT_TOKEN=$(echo "$RESPONSE" | jq -r '.auth.client_token')
           # echo "Vault Client Token: $AUTH_CLIENT_TOKEN"
 
+      - name: Check and Renew Vault Token (if needed)
+        if: steps.vault_auth.outputs.VAULT_TOKEN != '' # Only run if we have a token
+        id: vault_renewal
+        run: |
+          VAULT_ADDR="${{ steps.vault_auth.outputs.VAULT_ADDR }}"
+          CURRENT_TOKEN="${{ steps.vault_auth.outputs.VAULT_TOKEN }}"
+          echo "Checking Vault token TTL..."
+          TOKEN_INFO=$(curl -s \
+            --header "X-Vault-Token: $CURRENT_TOKEN" \
+            "$VAULT_ADDR/v1/auth/token/lookup-self")
+          TTL=$(echo "$TOKEN_INFO" | jq -r '.data.ttl')
+          echo "Current token TTL: $TTL seconds"
+
+          # Define a threshold for renewal (e.g., if TTL is less than 60 seconds)
+          RENEWAL_THRESHOLD=60
+          if (( $(echo "$TTL < $RENEWAL_THRESHOLD" | bc -l) )); then
+            echo "Renewing Vault token..."
+            RENEWAL_RESPONSE=$(curl -s --request POST \
+              --header "X-Vault-Token: $CURRENT_TOKEN" \
+              "$VAULT_ADDR/v1/auth/token/renew-self")
+            NEW_TOKEN=$(echo "$RENEWAL_RESPONSE" | jq -r '.auth.client_token')
+            if [[ -n "$NEW_TOKEN" ]]; then
+              echo "Vault token renewed successfully."
+              echo "NEW_VAULT_TOKEN=$NEW_TOKEN" >> "$GITHUB_OUTPUT"
+            else
+              echo "Failed to renew Vault token."
+              # Optionally fail the workflow here if token renewal fails
+              # exit 1
+            fi
+          else
+            echo "Vault token TTL is sufficient. No renewal needed."
+            echo "NEW_VAULT_TOKEN=$CURRENT_TOKEN" >> "$GITHUB_OUTPUT"
+          fi
+          
       - name: Retrieve Anypoint Credentials from Vault
         # Add steps here to retrieve the necessary Anypoint credentials
         run: |
