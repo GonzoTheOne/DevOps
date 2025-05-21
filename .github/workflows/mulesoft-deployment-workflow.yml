@@ -1,15 +1,15 @@
 name: MuleSoft Deployment
 
 on:
-  workflow_call:
-    inputs:
+  workflow_call: # This specifies that this workflow can be called by other workflows.
+    inputs: # These are parameters that the calling workflow must provide
       mule_app_name:
         required: true
         type: string
       anypoint_environment:
         required: true
         type: string
-    secrets:
+    secrets: #These are secrets that the calling workflow needs to provide
       VAULT_TOKEN:
         required: true
       ANYPOINT_CLIENT_ID:
@@ -41,22 +41,56 @@ jobs:
         # Add steps here to authenticate with Vault using the VAULT_TOKEN secret
         run: |
           echo "Authenticating with Vault..."
-          # You'll need Vault CLI or a similar tool here
+          # You'll need the Vault address
+          VAULT_ADDR="YOUR_VAULT_ADDRESS"
+          VAULT_TOKEN="${{ secrets.VAULT_TOKEN }}"
+
+          # Example: Get a client token (if needed, depending on your Vault setup)
+          # This step might not be necessary if the provided token is sufficient
+          # RESPONSE=$(curl -s --request POST \
+          #   --header "X-Vault-Token: $VAULT_TOKEN" \
+          #   --data '{"jwt": "YOUR_JWT", "role": "YOUR_ROLE"}' \
+          #   "$VAULT_ADDR/v1/auth/jwt/login")
+          # AUTH_CLIENT_TOKEN=$(echo "$RESPONSE" | jq -r '.auth.client_token')
+          # echo "Vault Client Token: $AUTH_CLIENT_TOKEN"
 
       - name: Retrieve Anypoint Credentials from Vault
         # Add steps here to retrieve the necessary Anypoint credentials
         run: |
           echo "Retrieving Anypoint credentials from Vault..."
-          # Use Vault CLI to read secrets based on inputs.mule_app_name and inputs.anypoint_environment
+          VAULT_ADDR="YOUR_VAULT_ADDRESS"
+          VAULT_TOKEN="${{ secrets.VAULT_TOKEN }}"
+          MULE_APP_NAME="${{ inputs.mule_app_name }}"
+          ANYPOINT_ENVIRONMENT="${{ inputs.anypoint_environment }}"
+          SECRET_PATH="secret/data/anypoint/${MULE_APP_NAME}/${ANYPOINT_ENVIRONMENT}" # Adjust this path as needed
+
+          RESPONSE=$(curl -s \
+            --header "X-Vault-Token: $VAULT_TOKEN" \
+            "$VAULT_ADDR/v1/$SECRET_PATH")
+
+          # Parse the JSON response to extract the credentials
+          ANYPOINT_CLIENT_ID=$(echo "$RESPONSE" | jq -r '.data.data.client_id')
+          ANYPOINT_CLIENT_SECRET=$(echo "$RESPONSE" | jq -r '.data.data.client_secret')
+          ANYPOINT_USERNAME=$(echo "$RESPONSE" | jq -r '.data.data.username')
+          ANYPOINT_PASSWORD=$(echo "$RESPONSE" | jq -r '.data.data.password')
+
+          # Now you can use these environment variables in subsequent steps
+          echo "ANYPOINT_CLIENT_ID=$ANYPOINT_CLIENT_ID" >> "$GITHUB_ENV"
+          echo "ANYPOINT_CLIENT_SECRET=$ANYPOINT_CLIENT_SECRET" >> "$GITHUB_ENV"
+          echo "ANYPOINT_USERNAME=$ANYPOINT_USERNAME" >> "$GITHUB_ENV"
+          echo "ANYPOINT_PASSWORD=$ANYPOINT_PASSWORD" >> "$GITHUB_ENV"
 
       - name: Authenticate with Anypoint Platform
         # Steps to authenticate with Anypoint using the retrieved credentials
         run: |
-          echo "Authenticating with Anypoint Platform..."
-          # You might set environment variables here
+          echo "Authenticating with Anypoint Platform using Vault-retrieved credentials..."
+          # You can now use the environment variables:
+          # $ANYPOINT_CLIENT_ID, $ANYPOINT_CLIENT_SECRET, $ANYPOINT_USERNAME, $ANYPOINT_PASSWORD
+          echo "Client ID: $ANYPOINT_CLIENT_ID"
+          # Add your Anypoint authentication logic here, potentially using the CLI or other tools
 
       - name: Deploy to Anypoint Marketplace Cloud
-        # Steps to deploy the Mule application
         run: |
           echo "Deploying to Anypoint environment: ${{ inputs.anypoint_environment }}"
-          # Use the Anypoint CLI or Maven plugin for deployment
+          # Use the Anypoint CLI or Maven plugin for deployment,
+          # potentially using the environment variables set above
