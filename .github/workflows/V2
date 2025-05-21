@@ -1,0 +1,180 @@
+# .github/workflows/deploy.yml in your 'mulesoft-deployment-workflow' repository
+name: MuleSoft Deployment Reusable Workflow
+
+on:
+  workflow_call:
+    inputs:
+      mule_app_name:
+        required: true
+        type: string
+        description: 'The name of the MuleSoft application being deployed.'
+      anypoint_environment:
+        required: true
+        type: string
+        description: 'The target Anypoint environment (e.g., dev, int, uat, prod).'
+    secrets:
+      VAULT_TOKEN:
+        required: true
+        description: 'HashiCorp Vault token for authentication.'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java and Maven
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17' # Adjust to your MuleSoft runtime's Java version
+          cache: 'maven'
+
+      - name: Build Mule Application
+        run: mvn clean package -DskipTests # -DskipTests if you're not running unit tests here
+
+      - name: Authenticate with HashiCorp Vault
+        id: vault_auth # This ID allows us to reference outputs from this step
+        run: |
+          VAULT_ADDR="https://abcd-vault.corp.com:8243"
+          VAULT_TOKEN="${{ secrets.VAULT_TOKEN }}"
+          echo "VAULT_ADDR=$VAULT_ADDR" >> "$GITHUB_OUTPUT"
+          echo "VAULT_TOKEN=$VAULT_TOKEN" >> "$GITHUB_OUTPUT"
+          echo "VAULT_ADDR set to $VAULT_ADDR"
+
+      - name: Install jq for JSON parsing
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Check and Renew Vault Token (if needed)
+        if: steps.vault_auth.outputs.VAULT_TOKEN != ''
+        id: vault_renewal
+        run: |
+          VAULT_ADDR="${{ steps.vault_auth.outputs.VAULT_ADDR }}"
+          CURRENT_TOKEN="${{ steps.vault_auth.outputs.VAULT_TOKEN }}"
+          echo "Checking Vault token TTL..."
+          
+          # Use curl with -k for insecure connection if your Vault has self-signed certs
+          # or ensure your runner has the necessary CA certificates
+          TOKEN_INFO=$(curl -s -k \
+            --header "X-Vault-Token: $CURRENT_TOKEN" \
+            "$VAULT_ADDR/v1/auth/token/lookup-self")
+          
+          # Check for errors in the Vault response (e.g., invalid token)
+          ERROR_MESSAGE=$(echo "$TOKEN_INFO" | jq -r '.errors[0]')
+          if [[ "$ERROR_MESSAGE" != "null" && -n "$ERROR_MESSAGE" ]]; then
+            echo "Error looking up Vault token: $ERROR_MESSAGE"
+            exit 1
+          fi
+
+          TTL=$(echo "$TOKEN_INFO" | jq -r '.data.ttl')
+          echo "Current token TTL: $TTL seconds"
+
+          RENEWAL_THRESHOLD=300 # 5 minutes (adjust as needed)
+          if (( $(echo "$TTL < $RENEWAL_THRESHOLD" | bc -l) )); then
+            echo "Vault token TTL is low ($TTL s). Attempting to renew..."
+            RENEWAL_RESPONSE=$(curl -s -k --request POST \
+              --header "X-Vault-Token: $CURRENT_TOKEN" \
+              "$VAULT_ADDR/v1/auth/token/renew-self")
+            
+            # Check for errors in renewal
+            RENEWAL_ERROR=$(echo "$RENEWAL_RESPONSE" | jq -r '.errors[0]')
+            if [[ "$RENEWAL_ERROR" != "null" && -n "$RENEWAL_ERROR" ]]; then
+              echo "Failed to renew Vault token: $RENEWAL_ERROR"
+              exit 1 # Fail the workflow if renewal fails
+            fi
+
+            NEW_TOKEN=$(echo "$RENEWAL_RESPONSE" | jq -r '.auth.client_token')
+            if [[ -n "$NEW_TOKEN" && "$NEW_TOKEN" != "null" ]]; then
+              echo "Vault token renewed successfully."
+              echo "NEW_VAULT_TOKEN=$NEW_TOKEN" >> "$GITHUB_OUTPUT"
+            else
+              echo "Failed to extract new token from renewal response. Response: $RENEWAL_RESPONSE"
+              exit 1
+            fi
+          else
+            echo "Vault token TTL is sufficient ($TTL s). No renewal needed."
+            echo "NEW_VAULT_TOKEN=$CURRENT_TOKEN" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Retrieve Anypoint Credentials from Vault
+        run: |
+          echo "Retrieving Anypoint credentials from Vault..."
+          VAULT_ADDR="${{ steps.vault_auth.outputs.VAULT_ADDR }}"
+          VAULT_TOKEN="${{ steps.vault_renewal.outputs.NEW_VAULT_TOKEN }}"
+          MULE_APP_NAME="${{ inputs.mule_app_name }}"
+          ANYPOINT_ENVIRONMENT="${{ inputs.anypoint_environment }}"
+          
+          # CORRECTED SECRET_PATH based on your input
+          SECRET_PATH="secrets/vault/1234/apimcrm2/${ANYPOINT_ENVIRONMENT}/gitActions/secrets/" 
+
+          echo "Attempting to retrieve from Vault path: $SECRET_PATH"
+
+          RESPONSE=$(curl -s -k \
+            --header "X-Vault-Token: $VAULT_TOKEN" \
+            "$VAULT_ADDR/v1/$SECRET_PATH")
+
+          # Check for errors in the secret retrieval response
+          RETRIEVAL_ERROR=$(echo "$RESPONSE" | jq -r '.errors[0]')
+          if [[ "$RETRIEVAL_ERROR" != "null" && -n "$RETRIEVAL_ERROR" ]]; then
+            echo "Error retrieving secrets from Vault: $RETRIEVAL_ERROR"
+            exit 1
+          fi
+
+          # Parse the JSON response to extract the credentials
+          # These jq paths for .data.data.* are correct for KV Secrets Engine v2
+          ANYPOINT_CLIENT_ID=$(echo "$RESPONSE" | jq -r '.data.data.client_id')
+          ANYPOINT_CLIENT_SECRET=$(echo "$RESPONSE" | jq -r '.data.data.client_secret')
+          ANYPOINT_USERNAME=$(echo "$RESPONSE" | jq -r '.data.data.username')
+          ANYPOINT_PASSWORD=$(echo "$RESPONSE" | jq -r '.data.data.password')
+
+          # Validate that values were actually retrieved
+          if [[ -z "$ANYPOINT_CLIENT_ID" || "$ANYPOINT_CLIENT_ID" == "null" ]]; then
+            echo "Error: client_id not found or is null in Vault response. Check Vault path and key names."
+            exit 1
+          fi
+          if [[ -z "$ANYPOINT_CLIENT_SECRET" || "$ANYPOINT_CLIENT_SECRET" == "null" ]]; then
+            echo "Error: client_secret not found or is null in Vault response. Check Vault path and key names."
+            exit 1
+          fi
+          # Add similar checks for username and password if they are critical
+
+          # Set these as environment variables for subsequent steps
+          echo "ANYPOINT_CLIENT_ID=$ANYPOINT_CLIENT_ID" >> "$GITHUB_ENV"
+          echo "ANYPOINT_CLIENT_SECRET=$ANYPOINT_CLIENT_SECRET" >> "$GITHUB_ENV"
+          echo "ANYPOINT_USERNAME=$ANYPOINT_USERNAME" >> "$GITHUB_ENV"
+          echo "ANYPOINT_PASSWORD=$ANYPOINT_PASSWORD" >> "$GITHUB_ENV"
+
+          echo "Anypoint credentials retrieved successfully."
+
+      - name: Authenticate with Anypoint Platform
+        run: |
+          echo "Authenticating with Anypoint Platform using Vault-retrieved credentials..."
+          # This is where you'd use the retrieved $ANYPOINT_CLIENT_ID, $ANYPOINT_CLIENT_SECRET, etc.
+          # For example, if you use the Anypoint CLI:
+          # npm install -g anypoint-cli # Install if not present
+          # anypoint-cli config set username $ANYPOINT_USERNAME
+          # anypoint-cli config set password $ANYPOINT_PASSWORD
+          # anypoint-cli login --client-id $ANYPOINT_CLIENT_ID --client-secret $ANYPOINT_CLIENT_SECRET
+          echo "Client ID being used (last 4 chars): ${ANYPOINT_CLIENT_ID: -4}" # Mask for security
+
+      - name: Deploy to Anypoint Marketplace Cloud
+        run: |
+          echo "Deploying Mule application '${{ inputs.mule_app_name }}' to Anypoint environment: ${{ inputs.anypoint_environment }}"
+          # This is the crucial step for your MuleSoft deployment.
+          # It typically involves the Mule Maven Plugin with goals like `deploy` or `cloudhub-deploy`.
+          # The environment variables set in the previous step ($ANYPOINT_CLIENT_ID, etc.) can be
+          # passed as Maven properties or picked up by the CLI.
+
+          # Example using Mule Maven Plugin with properties:
+          # mvn clean deploy -DskipMunitTests -Pcloudhub \
+          #   -Danypoint.platform.username=$ANYPOINT_USERNAME \
+          #   -Danypoint.platform.password=$ANYPOINT_PASSWORD \
+          #   -Danypoint.platform.client_id=$ANYPOINT_CLIENT_ID \
+          #   -Danypoint.platform.client_secret=$ANYPOINT_CLIENT_SECRET \
+          #   -Dmule.env=${{ inputs.anypoint_environment }} \
+          #   -Dmule.app.name=${{ inputs.mule_app_name }}
+          
+          echo "Placeholder for your actual MuleSoft deployment command (Maven or Anypoint CLI)."
+          echo "Remember to install any necessary tools (e.g., Anypoint CLI) in a prior step."
+
